@@ -173,7 +173,7 @@ BTCUSDP quantity 1 price 35,000
 BTCUSDP quantity 1 price 29,000
 ```
 
-If you send the a `MARKET BUY` order for `BTCUSDT` _using SOR_ with `quantity=11`, there is only 10 BTC in total available across all eligible order books. Once all the order books in SOR configuration have been exhausted, the remaining quantity of 1 expires.
+If you send a `MARKET BUY` order for `BTCUSDT` _using SOR_ with `quantity=11`, there is only 10 BTC in total available across all eligible order books. Once all the order books in SOR configuration have been exhausted, the remaining quantity of 1 expires.
 
 ```javascript
 {
@@ -360,7 +360,7 @@ When your order is filled by SOR, you will see `matchType: ONE_PARTY_TRADE_REPOR
 
 ## What are allocations?
 
-**An allocation** is transfer of asset from the exchange to your account. For example, when SOR takes liquidity from eligible order books, your order is filled by allocations. In this case you don't trade directly, but rather receive allocations from SOR corresponding to the trades made by SOR on your behalf.
+**An allocation** is a transfer of an asset from the exchange to your account. For example, when SOR takes liquidity from eligible order books, your order is filled by allocations. In this case you don't trade directly, but rather receive allocations from SOR corresponding to the trades made by SOR on your behalf.
 
 ```javascript
 [

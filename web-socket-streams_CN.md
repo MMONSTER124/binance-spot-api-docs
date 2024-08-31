@@ -1,5 +1,5 @@
 
-# Web Socket 行情接口(2023-05-24)
+# Web Socket 行情接口(2024-06-11)
 # 基本信息
 * 本篇所列出的所有wss接口的baseurl为: **wss://stream.binance.com:9443** 或者 **wss://stream.binance.com:443**
 * 所有stream均可以直接访问，或者作为组合streams的一部分。
@@ -8,7 +8,10 @@
 * 订阅组合streams时，事件payload会以这样的格式封装 **{"stream":"\<streamName\>","data":\<rawPayload\>}**
 * stream名称中所有交易对均为**小写**
 * 每个到**stream.binance.com**的链接有效期不超过24小时，请妥善处理断线重连。
-* 每3分钟，服务端会发送ping帧，客户端应当在10分钟内回复pong帧，否则服务端会主动断开链接。允许客户端发送不成对的pong帧(即客户端可以以高于10分钟每次的频率发送pong帧保持链接)。
+* Websocket 服务器每3分钟发送Ping消息。
+    * 如果Websocket服务器在10分钟之内没有收到Pong消息应答，连接会被断开。
+    * 当客户收到ping消息，必需尽快回复pong消息，同时payload需要和ping消息一致。
+    * 未经请求的pong消息是被允许的，但是不会保证连接不断开。**对于这些pong消息，建议payload为空**
 * **wss://data-stream.binance.vision** 可以用来订阅仅有市场信息的数据流。账户信息**无法**从此URL获得。
 
 ## WebSocket 连接限制
@@ -20,6 +23,151 @@
 * 如果用户发送的消息超过限制，连接会被断开连接。反复被断开连接的IP有可能被服务器屏蔽。
 * 单个连接最多可以订阅1024个Streams。
 * 每IP地址、每5分钟最多可以发送300次连接请求。
+
+
+
+## 实时订阅/取消数据流
+
+* 以下数据可以通过websocket发送以实现订阅或取消订阅数据流。示例如下.
+* 请求中的`id`被用作唯一标识来区分来回传递的消息。以下格式被接受:
+  * 64位有符号整数
+  * 字母数字字符串；最大长度36
+  * `null`
+* 如果相应内容中的`result` 为 `null`，表示请求发送成功。
+
+### 订阅一个信息流
+
+* 请求
+
+  ```javascript
+  {
+    "method": "SUBSCRIBE",
+    "params": [
+      "btcusdt@aggTrade",
+      "btcusdt@depth"
+    ],
+    "id": 1
+  }
+  ```
+
+* 响应
+
+  ```javascript
+  {
+    "result": null,
+    "id": 1
+  }
+  ```
+
+### 取消订阅一个信息流
+
+* 请求
+
+  ```javascript
+  {
+    "method": "UNSUBSCRIBE",
+    "params": [
+      "btcusdt@depth"
+    ],
+    "id": 312
+  }
+  ```
+
+* 响应
+
+  ```javascript
+  {
+    "result": null,
+    "id": 312
+  }
+  ```
+
+
+### 已订阅信息流
+
+* 请求
+
+  ```javascript
+  {
+    "method": "LIST_SUBSCRIPTIONS",
+    "id": 3
+  }
+  ```
+
+* 响应
+
+  ```javascript
+  {
+    "result": [
+      "btcusdt@aggTrade"
+    ],
+    "id": 3
+  }
+  ```
+
+
+### 设定属性
+当前，唯一可以设置的属性是设置是否启用`combined`("组合")信息流。
+当使用`/ws/`("原始信息流")进行连接时，combined属性设置为`false`，而使用 `/stream/`进行连接时则将属性设置为`true`。
+
+* 请求
+
+  ```javascript
+  {
+    "method": "SET_PROPERTY",
+    "params": [
+      "combined",
+      true
+    ],
+    "id": 5
+  }
+  ```
+
+* 响应
+
+  ```javascript
+  {
+    "result": null,
+    "id": 5
+  }
+  ```
+
+### 检索属性
+
+* 请求
+
+  ```javascript
+  {
+    "method": "GET_PROPERTY",
+    "params": [
+      "combined"
+    ],
+    "id": 2
+  }
+  ```
+
+* 响应
+
+  ```javascript
+  {
+    "result": true, // Indicates that combined is set to true.
+    "id": 2
+  }
+  ```
+
+### 错误信息
+
+错误信息 | 描述
+---|---
+{"code": 0, "msg": "Unknown property","id": %s} | `SET_PROPERTY` 或 `GET_PROPERTY`中应用的参数无效
+{"code": 1, "msg": "Invalid value type: expected Boolean"} | 仅接受`true`或`false`
+{"code": 2, "msg": "Invalid request: property name must be a string"}| 提供的属性名无效
+{"code": 2, "msg": "Invalid request: request ID must be an unsigned integer"}| 参数`id`未提供或`id`值是无效类型
+{"code": 2, "msg": "Invalid request: unknown variant %s, expected one of `SUBSCRIBE`, `UNSUBSCRIBE`, `LIST_SUBSCRIPTIONS`, `SET_PROPERTY`, `GET_PROPERTY` at line 1 column 28"} | 错字提醒，或提供的值不是预期类型
+{"code": 2, "msg": "Invalid request: too many parameters"}| 数据中提供了不必要参数
+{"code": 2, "msg": "Invalid request: property name must be a string"} | 未提供属性名
+{"code": 2, "msg": "Invalid request: missing field `method` at line 1 column 73"} | 数据未提供`method`
+{"code":3,"msg":"Invalid JSON: expected value at line %s column %s"} | JSON 语法有误.
 
 
 # Stream 详细定义
@@ -63,17 +211,16 @@
   "t": 12345,          // 交易ID
   "p": "0.001",        // 成交价格
   "q": "100",          // 成交数量
-  "b": 88,             // 买方的订单ID
-  "a": 50,             // 卖方的订单ID
   "T": 1672515782136,  // 成交时间
   "m": true,           // 买方是否是做市方。如true，则此次成交是一个主动卖出单，否则是一个主动买入单。
   "M": true            // 请忽略该字段
 }
 ```
 
-## K线
-K线stream逐秒推送所请求的K线种类(最新一根K线)的更新
+## UTC K线
+K线stream逐秒推送所请求的K线种类(最新一根K线)的更新。此更新是基于 `UTC+0` 时区的。
 
+<a id="kline-intervals"></a>
 **订阅Kline需要提供间隔参数，最短为分钟线，最长为月线。支持以下间隔:**
 
 m -> 分钟; h -> 小时; d -> 天; w -> 周; M -> 月
@@ -122,6 +269,49 @@ m -> 分钟; h -> 小时; d -> 天; w -> 周; M -> 月
     "V": "500",          // 主动买入的成交量
     "Q": "0.500",        // 主动买入的成交额
     "B": "123456"        // 忽略此参数
+  }
+}
+```
+## 带有时区偏移量的K线
+K线stream逐秒推送所请求的K线种类(最新一根K线)的更新。此更新是基于 `UTC+8` 时区的。
+
+**订阅Kline需要提供的间隔参数:**
+
+参考 [`Kline所支持的间隔参数`](#kline-intervals)
+
+**UTC+8 时区偏移量：**
+
+* K线间隔的开始和结束时间会基于 `UTC+8` 时区。例如， `1d` K线将在 `UTC+8` 当天开始，并在 `UTC+8` 当日完结时随之结束。
+* 请注意，Payload中的 `E`（event time），`t`（start time）和 `T`（close time）是 Unix 时间戳，它们始终以 UTC 格式解释。
+
+**Stream 名称:** \<symbol\>@kline_\<interval\>@+08:00
+
+**更新速度:** `1s` 1000ms，其它间隔 2000ms
+
+**Payload:**
+```javascript
+{
+  "e": "kline",         // Event type
+  "E": 1672515782136,   // Event time
+  "s": "BNBBTC",        // Symbol
+  "k": {
+    "t": 1672515780000, // Kline start time
+    "T": 1672515839999, // Kline close time
+    "s": "BNBBTC",      // Symbol
+    "i": "1m",          // Interval
+    "f": 100,           // First trade ID
+    "L": 200,           // Last trade ID
+    "o": "0.0010",      // Open price
+    "c": "0.0020",      // Close price
+    "h": "0.0025",      // High price
+    "l": "0.0015",      // Low price
+    "v": "1000",        // Base asset volume
+    "n": 100,           // Number of trades
+    "x": false,         // Is this kline closed?
+    "q": "1.0000",      // Quote asset volume
+    "V": "500",         // Taker buy base asset volume
+    "Q": "0.500",       // Taker buy quote asset volume
+    "B": "123456"       // Ignore
   }
 }
 ```
@@ -236,6 +426,29 @@ m -> 分钟; h -> 小时; d -> 天; w -> 周; M -> 月
   "A":"40.66000000"  // 卖单最优挂单数量
 }
 ```
+
+
+## 平均价格
+
+平均价格流推送在固定时间间隔内的平均价格变动。
+
+**Stream 名称:** \<symbol\>@avgPrice
+
+**更新速度:** 1000ms
+
+**Payload:**
+
+```javascript
+{
+  "e": "avgPrice",          // Event type
+  "E": 1693907033000,       // Event time
+  "s": "BTCUSDT",           // Symbol
+  "i": "5m",                // Average price interval
+  "w": "25776.86000000",    // Average price
+  "T": 1693907032213        // Last trade time
+}
+```
+
 
 ## 有限档深度信息
 每秒推送有限档深度信息。levels 表示几档买卖单信息, 可选 5/10/20档

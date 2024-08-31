@@ -1,4 +1,4 @@
-# Binance 的公共 WebSocket API (2023-08-08)
+# Binance 的公共 WebSocket API (2024-04-02)
 
 ## API 基本信息
 
@@ -6,9 +6,10 @@
   * 如果使用标准443端口时遇到问题，可以使用替代端口9443。
   * [现货测试网](https://testnet.binance.vision)的 base URL 是 `wss://testnet.binance.vision/ws-api/v3`。
 * 每个到 base URL 的链接有效期不超过24小时，请妥善处理断线重连。
-* WebSocket 服务器将在每3分钟发送一个 **ping 帧**。
-  * 如果服务器在10分钟内没有收到 **pong 帧** 响应，会主动断开链接。
-  * 允许客户端发送不成对的 **pong 帧**，以防止断开连接。
+* Websocket 服务器每3分钟发送Ping消息。
+    * 如果Websocket服务器在10分钟之内没有收到Pong消息应答，连接会被断开。
+    * 当客户收到ping消息，必需尽快回复pong消息，同时payload需要和ping消息一致。
+    * 未经请求的pong消息是被允许的，但是不会保证连接不断开。**对于这些pong消息，建议payload为空**
 * 响应中如有数组，数组元素以时间**时间顺序**排列，越早的数据越提前。
 * 除非另有说明，所有与时间戳相关的字段均以UTC的**毫秒**为单位。
 * 除非另有说明，所有字段名称和值都**大小写敏感**。
@@ -100,7 +101,7 @@
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 321
     }
   ]
@@ -136,7 +137,7 @@
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 322
     }
   ]
@@ -237,7 +238,7 @@
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 70
     }
   ]
@@ -285,7 +286,7 @@ API 有多种频率限制间隔。
   ```
 
   ```json
-  {"id":1,"status":200,"result":{"serverTime":1656400526260},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":1200,"count":70}]}
+  {"id":1,"status":200,"result":{"serverTime":1656400526260},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":70}]}
   ```
 
   没有频率限制状态的请求和响应：
@@ -303,7 +304,7 @@ API 有多种频率限制间隔。
   如果您希望在默认情况下从所有响应中省略 `rateLimits`，可以在 query string 中使用 `returnRateLimits` 参数：
 
   ```
-  wss://ws-api.binance.com/ws-api/v3?returnRateLimits=false
+  wss://ws-api.binance.com:443/ws-api/v3?returnRateLimits=false
   ```
 
   这将使通过此连接发出的所有请求的行为就像您已传了 `"returnRateLimits"：false` 一样。
@@ -341,7 +342,7 @@ API 有多种频率限制间隔。
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 70
     }
   ]
@@ -367,7 +368,7 @@ API 有多种频率限制间隔。
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 2411
     }
   ]
@@ -426,7 +427,7 @@ API 有多种频率限制间隔。
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 321
     }
   ]
@@ -459,7 +460,8 @@ API 有多种频率限制间隔。
 ## SIGNED (TRADE 和 USER_DATA) 请求鉴权
 
 * 为了授权请求，`SIGNED` 请求必须带 `signature` 参数。
-* 请参考 [签名请求示例（HMAC）](#SIGNED-请求示例-HMAC)和 [签名请求示例（RSA）](#SIGNED-请求示例-RSA)理解如何计算签名。
+* 请参考 [签名请求示例（HMAC）](#SIGNED-请求示例-HMAC), [签名请求示例（RSA）](#SIGNED-请求示例-RSA) 和 [SIGNED 请求示例 (Ed25519)](#signed-请求示例-ed25519) 理解如何计算签名。
+
 
 ## 时间同步安全
 
@@ -745,6 +747,51 @@ ws.close()
 print(result)
 ```
 
+
+## 会话身份验证
+
+**注意：** 仅支持 _Ed25519_ 密钥用于此功能。
+
+如果你不想在每个单独的请求中指定`apiKey`和`signature`，你可以为有效的WebSocket会话进行API密钥身份验证。
+
+一旦完成身份验证，你将不需在需要它们的请求中指定`apiKey`和`signature`。
+这些请求将代表拥有已验证API密钥的帐户执行。
+
+**注意：** 对于`SIGNED`请求，你仍需要指定`timestamp`参数。
+
+### 连接后进行身份验证
+
+你可以使用会话身份验证请求对已经建立的连接进行身份验证：
+
+* [`session.logon`](#log-in-with-api-key-signed) – 进行身份验证，或更改与连接相关联的API密钥。
+* [`session.status`](#query-session-status) – 检查连接状态和当前API密钥。
+* [`session.logout`](#log-out-of-the-session) – 忘记与连接关联的API密钥。
+
+
+**关于吊销API密钥:**
+
+如果在活动会话期间，由于 _任何_ 原因（例如IP地址未被加入白名单、API密钥被删除、API密钥没有正确的权限等），在下一个请求后，会话将被吊销，并显示以下错误消息:
+
+```javascript
+{
+  "id": null,
+  "status": 401,
+  "error": {
+    "code": -2015,
+    "msg": "Invalid API-key, IP, or permissions for action." 
+  }
+}
+```
+
+### 授权 _临时_ 请求
+
+WebSocket连接只能通过一个API密钥进行身份验证。
+默认情况下，经过身份验证的API密钥将用于需要`apiKey`参数的请求。
+但是，你始终可以为单个请求明确指定`apiKey`和`signature`，覆盖已认证的API密钥，以使用不同的API密钥授权特定请求。
+
+例如，你可能希望用默认密钥来验证 `USER_DATA`，但在下单时使用`TRADE`密钥来签名。
+
+
 # 数据源
 
 * API 系统是异步的。响应中一些延迟是正常和预期的。
@@ -769,81 +816,6 @@ print(result)
 
 * `base asset` 是指作为交易对中的 `quantity` 资产。对于交易对 BTCUSDT，BTC 将是 `base asset`。
 * `quote asset` 是指作为交易对中的 `price` 资产。对于交易对 BTCUSDT，USDT 将是 `quote asset`。
-
-## ENUM 定义
-**交易对状态 (status):**
-
-* `PRE_TRADING`
-* `TRADING`
-* `POST_TRADING`
-* `END_OF_DAY`
-* `HALT`
-* `AUCTION_MATCH`
-* `BREAK`
-
-<a id="permissions"></a>
-
-**账户和交易对权限 (permissions):**
-
-* `SPOT`
-* `MARGIN`
-* `LEVERAGED`
-* `TRD_GRP_002`
-* `TRD_GRP_003`
-* `TRD_GRP_004`
-* `TRD_GRP_005`
-* `TRD_GRP_006`
-* `TRD_GRP_007`
-* `TRD_GRP_008`
-* `TRD_GRP_009`
-* `TRD_GRP_010`
-* `TRD_GRP_011`
-* `TRD_GRP_012`
-* `TRD_GRP_013`
-
-
-**订单状态 (status):**
-
-状态 | 描述
------------| --------------
-`NEW` | 订单被交易引擎接受
-`PARTIALLY_FILLED`| 部分订单被成交
-`FILLED` | 订单完全成交
-`CANCELED` | 用户撤销了订单
-`PENDING_CANCEL` | 撤销中(目前并未使用)
-`REJECTED`       | 订单没有被交易引擎接受，也没被处理
-`EXPIRED` | 订单被交易引擎取消 （比如 LIMIT FOK 订单没有成交，LIMIT IOC 或者 市价单 没有完全成交）</br> 强平期间被取消的订单 （交易所维护期间被取消的订单）
-`EXPIRED_IN_MATCH` | 表示订单由于 STP 而过期（e.g. 带有 `EXPIRE_TAKER` 的订单与订单簿上属于同账户或同 `tradeGroupId` 的订单撮合）
-
-**OCO 状态 (listStatusType):**
-
-状态 | 描述
------------| --------------
-`RESPONSE` | 当`ListStatus`响应失败的操作时使用。(订单完成或取消订单)
-`EXEC_STARTED`| 当已经下单或者订单有更新时
-`ALL_DONE` | 当订单执行结束或者不在激活状态
-
-**OCO 订单状态 (listOrderStatus):**
-
-状态 | 描述
------------| --------------
-`EXECUTING` | 当已经下单或者订单有更新时
-`ALL_DONE`| 当订单执行结束或者不在激活状态
-`REJECT` | 当订单状态响应失败(订单完成或取消订单)
-
-**指定订单的类型**
-
-* `OCO`
-
-**分配类型**
-
-* `SOR`
-
-**工作平台**
-
-* `EXCHANGE`
-* `SOR`
-
 
 ## 常用请求信息
 
@@ -884,7 +856,7 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -924,7 +896,7 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -989,8 +961,13 @@ NONE
 
 * `permissions` 接受多个权限或单个权限名称, 比如 `"SPOT"`。
 
-* [可用权限](#permissions)
+* [可用权限](./enums_CN.md#account-and-symbol-permissions)
 
+### 解释响应中的 `permissionSets`：
+
+* `[["A","B"]]` - 有权限"A"**或**权限"B"的账户可以下订单。
+* `[["A"],["B"]]` - 有权限"A"**和**权限"B"的账户可以下订单。
+* `[["A"],["B","C"]]` - 有权限"A"**和**权限"B"或权限"C"的账户可以下订单。（此处应用的是包含或，而不是排除或，因此账户可以同时拥有权限"B"和权限"C"。）
 
 **数据源:**
 缓存
@@ -1009,7 +986,7 @@ NONE
         "rateLimitType": "REQUEST_WEIGHT",    // 速率限制类型: REQUEST_WEIGHT，ORDERS，CONNECTIONS
         "interval": "MINUTE",                 // 速率限制间隔: SECOND，MINUTE，DAY
         "intervalNum": 1,                     // 速率限制间隔乘数 (i.e.，"1 minute")
-        "limit": 1200                         // 每个间隔的速率限制
+        "limit": 6000                         // 每个间隔的速率限制
       },
       {
         "rateLimitType": "ORDERS",
@@ -1054,6 +1031,7 @@ NONE
         ],
         "icebergAllowed": true,
         "ocoAllowed": true,
+        "otoAllowed": true,
         "quoteOrderQtyMarketAllowed": true,
         "allowTrailingStop": true,
         "cancelReplaceAllowed": true,
@@ -1076,10 +1054,13 @@ NONE
             "stepSize": "0.00100000"
           }
         ],
-        "permissions": [
-          "SPOT",
-          "MARGIN",
-          "TRD_GRP_004"
+        "permissions": [],
+        "permissionSets": [
+          [
+            "SPOT",
+            "MARGIN",
+            "TRD_GRP_004"
+          ]
         ],
         "defaultSelfTradePreventionMode": "NONE",
         "allowedSelfTradePreventionModes": [
@@ -1102,8 +1083,8 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -1140,10 +1121,10 @@ NONE
 
 | 限制    | 重量 |
 |:---------:|:------:|
-|     1–100 |      2 |
-|   101–500 |      10 |
-|  501–1000 |     20 |
-| 1001–5000 |     100 |
+|     1–100 |      5 |
+|   101–500 |      25 |
+|  501–1000 |     50 |
+| 1001–5000 |     250 |
 
 **参数:**
 
@@ -1214,8 +1195,8 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 5
     }
   ]
 }
@@ -1242,7 +1223,7 @@ NONE
 * [`<symbol>@trade`](web-socket-streams_CN.md#逐笔交易)
 
 **权重:**
-2
+25
 
 **参数:**
 
@@ -1275,8 +1256,8 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 10
     }
   ]
 }
@@ -1299,7 +1280,7 @@ NONE
 获取历史交易。
 
 **权重:**
-10
+25
 
 **参数:**
 
@@ -1337,8 +1318,8 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 5
+      "limit": 6000,
+      "count": 10
     }
   ]
 }
@@ -1419,8 +1400,8 @@ NONE
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -1462,6 +1443,7 @@ Klines 由其开盘时间和收盘时间为唯一标识。
 `interval`  | ENUM    | YES       |
 `startTime` | INT     | NO        |
 `endTime`   | INT     | NO        |
+`timeZone` |STRING | NO | 默认: 0 (UTC)
 `limit`     | INT     | NO        | 默认 500; 最大值 1000
 
 <a id="kline-intervals"></a>
@@ -1479,6 +1461,12 @@ months    | `1M`
 备注:
 
 * 如果没有指定 `startTime`，`endTime`，则返回最近的klines。
+* `timeZone`支持的值包括：
+  * 小时和分钟（例如 `-1:00`，`05:45`）
+  * 仅小时（例如 `0`，`8，`4）
+  * 接受的值范围严格为 [-12:00 到 +14:00]（包括边界）
+* 如果提供了`timeZone`，K线间隔将在该时区中解释，而不是在UTC中。
+* 请注意，无论`timeZone`如何，`startTime`和`endTime`始终以UTC时区解释。
 
 **数据源:**
 数据库
@@ -1509,8 +1497,8 @@ months    | `1M`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -1545,11 +1533,18 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
 `interval`  | ENUM    | YES       | 请看 [`k线`](#kline-intervals)
 `startTime` | INT     | NO        |
 `endTime`   | INT     | NO        |
+`timeZone` |STRING | NO | 默认: 0 (UTC)
 `limit`     | INT     | NO        | 默认 500; 最大值 1000
 
 备注:
 
 * 如果没有指定 `startTime`，`endTime`，则返回最近的klines。
+* `timeZone`支持的值包括：
+  * 小时和分钟（例如 `-1:00`，`05:45`）
+  * 仅小时（例如 `0`，`8，`4）
+  * 接受的值范围严格为 [-12:00 到 +14:00]（包括边界）
+* 如果提供了`timeZone`，K线间隔将在该时区中解释，而不是在UTC中。
+* 请注意，无论`timeZone`如何，`startTime`和`endTime`始终以UTC时区解释。
 
 **数据源:**
 数据库
@@ -1580,8 +1575,8 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -1620,14 +1615,15 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
   "status": 200,
   "result": {
     "mins": 5,              // 以分钟为单位的价格平均间隔 
-    "price": "0.01378135"
+    "price": "0.01378135",
+    "closeTime": 1694061154503
   },
   "rateLimits": [
     {
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -1741,8 +1737,8 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -1773,8 +1769,8 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -1839,12 +1835,253 @@ uiKlines 是返回修改后的k线数据，针对k线图的呈现进行了优化
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
 ```
+
+
+### 交易日行情(Ticker)
+
+```javascript
+{
+  "id": "f4b3b507-c8f2-442a-81a6-b2f12daa030f",
+  "method": "ticker.tradingDay",
+  "params": {
+    "symbols": [
+      "BNBBTC",
+      "BTCUSDT"
+    ],
+    "timeZone": "00:00"
+  }
+}
+```
+
+交易日价格变动统计。
+
+**权重:**
+
+每个<tt>交易对</tt>占用4个权重. <br/><br/> 
+当请求中的交易对数量超过50，此请求的权重将限制在200。
+
+**参数:**
+
+<table>
+  <tr>
+    <th>参数名</th>
+    <th>类型</th>
+    <th>是否必需</th>
+    <th>描述</th>
+  </tr>
+  <tr>
+    <td><code>symbol</code></td>
+    <td>STRING</td>
+    <td rowspan="2" align="center">YES</td>
+    <td>查询单交易对的行情</td>
+  </tr>
+  <tr>
+    <td><code>symbols</code></td>
+    <td>ARRAY of STRING</td>
+    <td>查询多交易对行情</td>
+  </tr>
+  <tr>
+     <td><code>timeZone</code></td>
+     <td>STRING</td>
+     <td>NO</td>
+     <td>默认: 0 (UTC)</td>
+  </tr>
+  <tr>
+      <td><code>type</code></td>
+      <td>ENUM</td>
+      <td>NO</td>
+      <td>可接受值: <tt>FULL</tt> or <tt>MINI</tt>. <br/>默认值: <tt>FULL</tt></td>
+  </tr>
+</table>
+
+**注意:**
+
+* `timeZone`支持的值包括：
+    * 小时和分钟（例如 `-1:00`，`05:45`）
+    * 仅小时（例如 `0`，`8`，`4`）
+
+**数据源:**
+数据库
+
+**响应 - FULL**
+
+有 `symbol`:
+
+```javascript
+{
+  "id": "f4b3b507-c8f2-442a-81a6-b2f12daa030f",
+  "status": 200,
+  "result": {
+    "symbol": "BTCUSDT",
+    "priceChange": "-83.13000000",                // 绝对价格变动
+    "priceChangePercent": "-0.317",               // 相对价格变动百分比
+    "weightedAvgPrice": "26234.58803036",         // 报价成交量 / 成交量
+    "openPrice": "26304.80000000",
+    "highPrice": "26397.46000000",
+    "lowPrice": "26088.34000000",
+    "lastPrice": "26221.67000000",
+    "volume": "18495.35066000",                   // 基础资产的成交量
+    "quoteVolume": "485217905.04210480",
+    "openTime": 1695686400000,
+    "closeTime": 1695772799999,
+    "firstId": 3220151555,
+    "lastId": 3220849281,
+    "count": 697727
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 4
+    }
+  ]
+}
+```
+
+有 `symbols`:
+
+```javascript
+{
+  "id": "f4b3b507-c8f2-442a-81a6-b2f12daa030f",
+  "status": 200,
+  "result": [
+    {
+      "symbol": "BTCUSDT",
+      "priceChange": "-83.13000000",
+      "priceChangePercent": "-0.317",
+      "weightedAvgPrice": "26234.58803036",
+      "openPrice": "26304.80000000",
+      "highPrice": "26397.46000000",
+      "lowPrice": "26088.34000000",
+      "lastPrice": "26221.67000000",
+      "volume": "18495.35066000",
+      "quoteVolume": "485217905.04210480",
+      "openTime": 1695686400000,
+      "closeTime": 1695772799999,
+      "firstId": 3220151555,
+      "lastId": 3220849281,
+      "count": 697727
+    },
+    {
+      "symbol": "BNBUSDT",
+      "priceChange": "2.60000000",
+      "priceChangePercent": "1.238",
+      "weightedAvgPrice": "211.92276958",
+      "openPrice": "210.00000000",
+      "highPrice": "213.70000000",
+      "lowPrice": "209.70000000",
+      "lastPrice": "212.60000000",
+      "volume": "280709.58900000",
+      "quoteVolume": "59488753.54750000",
+      "openTime": 1695686400000,
+      "closeTime": 1695772799999,
+      "firstId": 672397461,
+      "lastId": 672496158,
+      "count": 98698
+    }
+  ],
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 8
+    }
+  ]
+}
+```
+
+**相应: - MINI**
+
+有 `symbol`:
+
+```javascript
+{
+  "id": "f4b3b507-c8f2-442a-81a6-b2f12daa030f",
+  "status": 200,
+  "result": {
+    "symbol": "BTCUSDT",
+    "openPrice": "26304.80000000",
+    "highPrice": "26397.46000000",
+    "lowPrice": "26088.34000000",
+    "lastPrice": "26221.67000000",
+    "volume": "18495.35066000",                  // 基础资产的成交量
+    "quoteVolume": "485217905.04210480",         // 报价资产的成交量
+    "openTime": 1695686400000,
+    "closeTime": 1695772799999,
+    "firstId": 3220151555,                       // 区间内的第一个交易的交易ID
+    "lastId": 3220849281,                        // 区间内的最后一个交易的交易ID
+    "count": 697727                              // 区间内的交易数量
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 4
+    }
+  ]
+}
+```
+
+With `symbols`:
+
+```javascript
+{
+  "id": "f4b3b507-c8f2-442a-81a6-b2f12daa030f",
+  "status": 200,
+  "result": [
+    {
+      "symbol": "BTCUSDT",
+      "openPrice": "26304.80000000",
+      "highPrice": "26397.46000000",
+      "lowPrice": "26088.34000000",
+      "lastPrice": "26221.67000000",
+      "volume": "18495.35066000",
+      "quoteVolume": "485217905.04210480",
+      "openTime": 1695686400000,
+      "closeTime": 1695772799999,
+      "firstId": 3220151555,
+      "lastId": 3220849281,
+      "count": 697727
+    },
+    {
+      "symbol": "BNBUSDT",
+      "openPrice": "210.00000000",
+      "highPrice": "213.70000000",
+      "lowPrice": "209.70000000",
+      "lastPrice": "212.60000000",
+      "volume": "280709.58900000",
+      "quoteVolume": "59488753.54750000",
+      "openTime": 1695686400000,
+      "closeTime": 1695772799999,
+      "firstId": 672397461,
+      "lastId": 672496158,
+      "count": 98698
+    }
+  ],
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 8
+    }
+  ]
+}
+```
+
 
 ### 滚动窗口价格变动统计
 
@@ -1986,8 +2223,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
@@ -2018,8 +2255,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
@@ -2072,8 +2309,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 4
+      "limit": 6000,
+      "count": 8
     }
   ]
 }
@@ -2157,8 +2394,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -2189,8 +2426,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
@@ -2279,8 +2516,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -2313,12 +2550,146 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
 ```
+
+## 身份验证请求
+
+**注意：** 仅支持 _Ed25519_ 密钥用于此功能。
+
+### 用API key登录 (SIGNED)
+
+```javascript
+{
+  "id": "c174a2b1-3f51-4580-b200-8528bd237cb7",
+  "method": "session.logon",
+  "params": {
+    "apiKey": "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A",
+    "signature": "1cf54395b336b0a9727ef27d5d98987962bc47aca6e13fe978612d0adee066ed",
+    "timestamp": 1649729878532
+  }
+}
+```
+
+使用提供的API密钥进行WebSocket连接身份验证。
+
+在调用`session.logon`后，将来的需要`apiKey`和`signature`参数的请求可以省略它们。
+
+请注意，只能认证一个API密钥。
+多次调用`session.logon`将更改当前已认证的API密钥。
+
+**权重:**
+2
+
+**参数:**
+
+参数名          | 类型    | 是否必需 | 描述
+------------- | ------- | --------- | ------------
+`apiKey`      | STRING  | YES       |
+`recvWindow`  | INT     | NO        | The value cannot be greater than `60000`
+`signature`   | STRING  | YES       |
+`timestamp`   | INT     | YES       |
+
+**数据源:**
+缓存
+
+**响应:**
+
+```javascript
+{
+  "id": "c174a2b1-3f51-4580-b200-8528bd237cb7",
+  "status": 200,
+  "result": {
+    "apiKey": "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A",
+    "authorizedSince": 1649729878532,
+    "connectedSince": 1649729873021,
+    "returnRateLimits": false,
+    "serverTime": 1649729878630
+  }
+}
+```
+
+### 查询会话状态
+
+```javascript
+{
+  "id": "b50c16cd-62c9-4e29-89e4-37f10111f5bf",
+  "method": "session.status"
+}
+```
+
+查询WebSocket连接的状态，检查用于授权请求的API密钥（如果有的话）。
+
+**权重:**
+2
+
+**参数:**
+NONE
+
+**数据源:**
+缓存
+
+**响应:**
+
+```javascript
+{
+  "id": "b50c16cd-62c9-4e29-89e4-37f10111f5bf",
+  "status": 200,
+  "result": {
+    // 如果连接未经身份验证，"apiKey" 和 "authorizedSince" 将显示为 null。
+    "apiKey": "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A",
+    "authorizedSince": 1649729878532,
+    "connectedSince": 1649729873021,
+    "returnRateLimits": false,
+    "serverTime": 1649730611671
+  }
+}
+```
+
+### 退出会话
+
+```javascript
+{
+  "id": "c174a2b1-3f51-4580-b200-8528bd237cb7",
+  "method": "session.logout"
+}
+```
+
+忘记之前认证的API密钥。
+如果连接未经身份验证，此请求不会有任何作用。
+
+请注意，`session.logout`请求后，WebSocket连接仍然保持打开状态。
+你可以继续使用连接，但现在必须在需要的地方明确提供`apiKey`和`signature`参数。
+
+**权重:**
+2
+
+**参数:**
+NONE
+
+**数据源:**
+缓存
+
+**响应:**
+
+```javascript
+{
+  "id": "c174a2b1-3f51-4580-b200-8528bd237cb7",
+  "status": 200,
+  "result": {
+    "apiKey": null,
+    "authorizedSince": null,
+    "connectedSince": 1649729873021,
+    "returnRateLimits": false,
+    "serverTime": 1649730611671
+  }
+}
+```
+
 
 ## 交易请求
 
@@ -2361,7 +2732,7 @@ days    | `1d`, `2d` ... `7d`
 `newClientOrderId`  | STRING  | NO        | 客户自定义的唯一订单ID。如果未发送，则自动生成。
 `newOrderRespType`  | ENUM    | NO        | <p>可选的响应格式: `ACK`，`RESULT`，`FULL`.</p><p>`MARKET`和`LIMIT`订单默认使用`FULL`，其他订单类型默认使用`ACK`。</p>
 `stopPrice`         | DECIMAL | NO *      |
-`trailingDelta`     | INT     | NO *      | 请看 [Trailing Stop order FAQ](faqs/trailing-stop-faq-cn.md)
+`trailingDelta`     | INT     | NO *      | 请看 [Trailing Stop order FAQ](faqs/trailing-stop-faq_CN.md)
 `icebergQty`        | DECIMAL | NO        |
 `strategyId`        | INT     | NO        | 标识订单策略中订单的任意ID。
 `strategyType`      | INT     | NO        | <p>标识订单策略的任意数值。</p><p>小于`1000000`的值是保留的，不能使用。</p>
@@ -2615,7 +2986,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -2664,7 +3035,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -2730,7 +3101,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -2739,7 +3110,7 @@ days    | `1d`, `2d` ... `7d`
 
 ## 订单响应中的特定条件时才会出现的字段
 
-订单响应中的有一些字段仅在满足特定条件时才会出现。这些订单响应可以来自下订单，查询订单或取消订单，并且可以包括 OCO 订单类型。
+订单响应中的有一些字段仅在满足特定条件时才会出现。这些订单响应可以来自下订单，查询订单或取消订单，并且可以包括订单列表类型。
 下面列出了这些字段：
 
 名称           | 描述                                                           |显示的条件                                          | 示例 |
@@ -2752,6 +3123,7 @@ days    | `1d`, `2d` ... `7d`
 `strategyType` | 策略单类型; 用以显示此订单对应的交易策略。                           | 如果在请求中添加了参数，则会出现。                      | `"strategyType": 1000000` |
 `trailingDelta`| 用以定义追踪止盈止损订单被触发的价格差。                             | 出现在追踪止损订单中。                                | `"trailingDelta": 10` |
 `trailingTime` | 追踪单被激活和跟踪价格变化的时间。                                  | 出现在追踪止损订单中。                                 | `"trailingTime": -1`|
+`usedSor` | 用于确定订单是否使用`SOR`的字段 | 在使用`SOR`下单时出现 |`"usedSor": true`
 `workingFloor` | 用以定义订单是通过 SOR 还是由订单提交到的订单薄（order book）成交的。   |出现在使用了 SOR 的订单中。                             |`"workingFloor": "SOR"`|
 
 
@@ -2780,16 +3152,29 @@ days    | `1d`, `2d` ... `7d`
 验证新订单参数并验证您的签名但不会将订单发送到撮合引擎。
 
 **权重:**
-1
+
+|条件| 请求权重 |
+|------------           | ------------ |
+|没有 `computeCommissionRates`| 1|
+|有 `computeCommissionRates`|20|
 
 **参数:**
 
-与 [`order.place`](##下新的订单-trade) 相同。
+除了 [`order.place`](##下新的订单-trade) 的所有参数,
+下面参数也有效:
+
+参数名                   |类型          | 是否必需    | 描述
+------------           | ------------ | ------------ | ------------
+`computeCommissionRates` | BOOLEAN      | NO         | 默认: `false`
+
 
 **数据源:**
 缓存
 
 **响应:**
+
+没有 `computeCommissionRates`:
+
 ```javascript
 {
   "id": "6ffebe91-01d9-43ac-be99-57cf062e0e30",
@@ -2800,8 +3185,43 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
+    }
+  ]
+}
+```
+
+
+有 `computeCommissionRates`:
+
+```javascript
+{
+  "id": "6ffebe91-01d9-43ac-be99-57cf062e0e30",
+  "status": 200,
+  "result": {
+    "standardCommissionForOrder": {           // 根据订单的角色（例如，Maker或Taker）确定的佣金费率。
+      "maker": "0.00000112",
+      "taker": "0.00000114"
+    },
+    "taxCommissionForOrder": {                 // 根据订单的角色（例如，Maker或Taker）确定的税收扣除率。
+      "maker": "0.00000112",
+      "taker": "0.00000114"
+    },  
+    "discount": {                              // 以BNB支付时的标准佣金折扣。
+      "enabledForAccount": true,
+      "enabledForSymbol": true,
+      "discountAsset": "BNB",
+      "discount": "0.25000000"                 // 当用BNB支付佣金时，在标准佣金上按此比率打折。
+    }
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -2901,7 +3321,7 @@ days    | `1d`, `2d` ... `7d`
   "result": {
     "symbol": "BTCUSDT",
     "orderId": 12569099453,
-    "orderListId": -1,                  // OCO订单的ID，不然就是-1
+    "orderListId": -1,                  // 订单列表的ID，不然就是-1
     "clientOrderId": "4d96324ff9d44481926157",
     "price": "23416.10000000",
     "origQty": "0.00847000",
@@ -2931,8 +3351,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
@@ -3034,7 +3454,7 @@ days    | `1d`, `2d` ... `7d`
 
 * `newClientOrderId` 将替换已取消订单的 `clientOrderId`，为新订单腾出空间。
 
-* 如果您取消属于 OCO 对的订单，则整个 OCO 将被取消。
+* 如果您取消属于订单列表的订单，则整个订单列表将被取消。
 
 **数据源:**
 撮合引擎
@@ -3051,7 +3471,7 @@ days    | `1d`, `2d` ... `7d`
     "symbol": "BTCUSDT",
     "origClientOrderId": "4d96324ff9d44481926157",  // 被取消的 clientOrderId
     "orderId": 12569099453,
-    "orderListId": -1,                              // OCO订单的ID，不然就是 -1
+    "orderListId": -1,                              // 订单列表的ID，不然就是 -1
     "clientOrderId": "91fe37ce9e69c90d6358c0",      // 请求的 newClientOrderId
     "transactTime": 1684804350068,
     "price": "23416.10000000",
@@ -3074,14 +3494,14 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 2
     }
   ]
 }
 ```
 
-取消 OCO 时：
+取消订单列表时：
 
 ```javascript
 {
@@ -3151,7 +3571,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3308,7 +3728,7 @@ days    | `1d`, `2d` ... `7d`
         <td><code>trailingDelta</code></td>
         <td>DECIMAL</td>
         <td>NO *</td>
-        <td>请看 <a href="faqs/trailing-stop-faq-cn.md">Trailing Stop order FAQ</a></td>
+        <td>请看 <a href="faqs/trailing-stop-faq_CN.md">Trailing Stop order FAQ</a></td>
     </tr>
     <tr>
         <td><code>icebergQty</code></td>
@@ -3353,6 +3773,12 @@ days    | `1d`, `2d` ... `7d`
         <td></td>
     </tr>
     <tr>
+        <td><code>orderRateLimitExceededMode</code></td>
+        <td>ENUM</td>
+        <td>NO</td>
+        <td>支持的值: <br> <code>DO_NOTHING</code> （默认值）- 只有在帐户未超过订单速率限制的情况下，才会尝试取消订单。<br> <code>CANCEL_ONLY</code> - 将始终取消订单。</td>
+    </tr>    
+    <tr>
         <td><code>recvWindow</code></td>
         <td>INT</td>
         <td>NO</td>
@@ -3377,17 +3803,19 @@ days    | `1d`, `2d` ... `7d`
 
 可用的 `cancelReplaceMode` 选项：
 
-* `STOP_ON_FAILURE` – 如果撤销订单请求失败，将不会尝试下新订单
-* `ALLOW_FAILURE` – 即使撤销订单请求失败，也会尝试下新订单
+* `STOP_ON_FAILURE` – 如果撤销订单请求失败，将不会尝试下新订单。
+* `ALLOW_FAILURE` – 即使撤销订单请求失败，也会尝试下新订单。
 
 <table>
 <thead>
     <tr>
-        <th>Request</th>
-        <th colspan=3>Response</th>
+        <th colspan=3 align=left>请求</th>
+        <th colspan=3 align=left>响应</th>
     </tr>
     <tr>
         <th><code>cancelReplaceMode</code></th>
+        <th><code>orderRateLimitExceededMode</code></th>
+        <th>下单数</th>
         <th><code>cancelResult</code></th>
         <th><code>newOrderResult</code></th>
         <th><code>status</code></th>
@@ -3395,7 +3823,9 @@ days    | `1d`, `2d` ... `7d`
 </thead>
 <tbody>
     <tr>
-        <td rowspan="3"><code>STOP_ON_FAILURE</code></td>
+        <td rowspan="11"><code>STOP_ON_FAILURE</code></td>
+        <td rowspan="6"><code>DO_NOTHING</code></td>
+        <td rowspan="3">在限制范围内</td>
         <td>✅ <code>SUCCESS</code></td>
         <td>✅ <code>SUCCESS</code></td>
         <td align=right><code>200</code></td>
@@ -3411,7 +3841,53 @@ days    | `1d`, `2d` ... `7d`
         <td align=right><code>409</code></td>
     </tr>
     <tr>
-        <td rowspan="4"><code>ALLOW_FAILURE</code></td>
+        <td rowspan="3">超出限制范围</td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>➖ <code>NOT_ATTEMPTED</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right>N/A</td>
+    </tr>
+     <tr>
+        <td rowspan="5"><code>CANCEL_ONLY</code></td>
+        <td rowspan="3">在限制范围内</td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right><code>200</code></td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>➖ <code>NOT_ATTEMPTED</code></td>
+        <td align=right><code>400</code></td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>409</code></td>
+    </tr>
+    <tr>
+        <td rowspan="2">超出限制范围</td>
+        <td>❌ <code>FAILURE</code></td>
+        <td>➖ <code>NOT_ATTEMPTED</code></td>
+        <td align=right><code>429</code></td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>429</code></td>
+    </tr>
+    <tr>
+        <td rowspan="16"><code>ALLOW_FAILURE</code></td>
+        <td rowspan="8"><code>DO_NOTHING</code></td>
+        <td rowspan="4">在限制范围内</td>
         <td>✅ <code>SUCCESS</code></td>
         <td>✅ <code>SUCCESS</code></td>
         <td align=right><code>200</code></td>
@@ -3425,6 +3901,70 @@ days    | `1d`, `2d` ... `7d`
         <td>❌ <code>FAILURE</code></td>
         <td>✅ <code>SUCCESS</code></td>
         <td align=right><code>409</code></td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>409</code></td>
+    </tr>
+    <tr>
+     <td rowspan="4">超出限制范围</td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right>N/A</td>
+    </tr>
+    <tr>
+        <td rowspan="8"><CODE>CANCEL_ONLY</CODE></td>
+        <td rowspan="4">在限制范围内</td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right><code>200</code></td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>400</code></td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right><code>409</code></td>
+    </tr>
+    <tr>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>409</code></td>
+    </tr>
+    <tr>
+        <td rowspan="4">超出限制范围</td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right><code>200</code></td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>❌ <code>FAILURE</code></td>
+        <td align=right><code>400</code></td>
+    </tr>
+    <tr>
+        <td>❌ <code>FAILURE</code></td>
+        <td>✅ <code>SUCCESS</code></td>
+        <td align=right>N/A</td>
     </tr>
     <tr>
         <td>✅ <code>SUCCESS</code></td>
@@ -3456,7 +3996,7 @@ days    | `1d`, `2d` ... `7d`
 
 * 如果未尝试下新订单，订单次数仍会增加。
 
-* 与 [`order.cancel`](#撤销订单-TRADE) 一样，如果您撤销 OCO 的某个边，则整个 OCO 将被撤销。
+* 与 [`order.cancel`](#撤销订单-TRADE) 一样，如果您撤销订单列表内的某个订单，则整个订单列表将被撤销。
 
 **数据源:**
 撮合引擎
@@ -3529,7 +4069,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3574,7 +4114,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3635,7 +4175,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3693,7 +4233,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3741,7 +4281,104 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
+      "count": 1
+    }
+  ]
+}
+```
+
+如果 `orderRateLimitExceededMode` 是 `DO_NOTHING`，那么无论 `cancelReplaceMode` 的取值，当账户超出下单速率限制时，响应将有 `"status": 429`:
+
+```javascript
+{
+  "id": "3b3ac45c-1002-4c7d-88e8-630c408ecd87",
+  "status": 429,
+  "error": {
+    "code": -1015,
+    "msg": "Too many new orders; current limit is 50 orders per 10 SECOND."
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "SECOND",
+      "intervalNum": 10,
+      "limit": 50,
+      "count": 50
+    },
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "DAY",
+      "intervalNum": 1,
+      "limit": 160000,
+      "count": 50
+    },
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 1
+    }
+  ]
+}
+```
+
+如果 `orderRateLimitExceededMode` 是 `CANCEL_ONLY`，那么无论 `cancelReplaceMode` 的取值，当账户超出下单速率限制时，响应将有 `"status": 409`:
+
+```javascript
+{
+  "id": "3b3ac45c-1002-4c7d-88e8-630c408ecd87",
+  "status": 409,
+  "error": {
+    "code": -2021,
+    "msg": "Order cancel-replace partially failed.",
+    "data": {
+      "cancelResult": "SUCCESS",
+      "newOrderResult": "FAILURE",
+      "cancelResponse": {
+        "symbol": "LTCBNB",
+        "origClientOrderId": "GKt5zzfOxRDSQLveDYCTkc",
+        "orderId": 64,
+        "orderListId": -1,
+        "clientOrderId": "loehOJF3FjoreUBDmv739R",
+        "transactTime": 1715779007228,
+        "price": "1.00",
+        "origQty": "10.00000000",
+        "executedQty": "0.00000000",
+        "cummulativeQuoteQty": "0.00",
+        "status": "CANCELED",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "selfTradePreventionMode": "NONE"
+      },
+      "newOrderResponse": {
+        "code": -1015,
+        "msg": "Too many new orders; current limit is 50 orders per 10 SECOND."
+      }
+    }
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "SECOND",
+      "intervalNum": 10,
+      "limit": 50,
+      "count": 50
+    },
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "DAY",
+      "intervalNum": 1,
+      "limit": 160000,
+      "count": 50
+    },
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3835,8 +4472,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 3
+      "limit": 6000,
+      "count": 6
     }
   ]
 }
@@ -3859,7 +4496,7 @@ days    | `1d`, `2d` ... `7d`
 }
 ```
 
-撤销单一交易对的所有挂单,包括 OCO 订单。
+撤销单一交易对的所有挂单,包括交易组。
 
 **权重:**
 1
@@ -3879,7 +4516,7 @@ days    | `1d`, `2d` ... `7d`
 
 **响应:**
 
-订单和 OCO 的撤销报告的格式与 [`order.cancel`](#撤销订单-TRADE) 中的格式相同。
+订单和订单列表的撤销报告的格式与 [`order.cancel`](#撤销订单-TRADE) 中的格式相同。
 
 ```javascript
 {
@@ -3971,7 +4608,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -3980,7 +4617,7 @@ days    | `1d`, `2d` ... `7d`
 
 **注意:** 上面的 payload 没有显示所有可以出现的字段，更多请看 "订单响应中的特定条件时才会出现的字段" 部分。
 
-### OCO下单 (TRADE)
+### OCO下单 - 已弃用 (TRADE)
 
 ```javascript
 {
@@ -4016,13 +4653,13 @@ days    | `1d`, `2d` ... `7d`
 `side`              | ENUM    | YES       | `BUY` 或者 `SELL`
 `price`             | DECIMAL | YES       | Limit 订单的价格
 `quantity`          | DECIMAL | YES       |
-`listClientOrderId` | STRING  | NO        | OCO 挂单的客户自定义的唯一订单ID。如果未发送，则自动生成
+`listClientOrderId` | STRING  | NO        | 订单列表的客户自定义的唯一订单ID。如果未发送，则自动生成
 `limitClientOrderId`| STRING  | NO        | Limit 挂单的客户自定义的唯一订单ID。如果未发送，则自动生成
 `limitIcebergQty`   | DECIMAL | NO        |
 `limitStrategyId`   | INT     | NO        | 标识订单策略中的 limit 订单的任意ID。
 `limitStrategyType` | INT     | NO        | <p>标识 limit 订单策略的任意数值</p><p>小于`1000000`的值是保留的，不能使用。</p>
 `stopPrice`         | DECIMAL | YES *     | 必须指定 `stopPrice` 或 `trailingDelta`，或两者都指定
-`trailingDelta`     | INT     | YES *     | 请看 [追踪止盈止损(Trailing Stop)订单常见问题](faqs/trailing-stop-faq-cn.md)
+`trailingDelta`     | INT     | YES *     | 请看 [追踪止盈止损(Trailing Stop)订单常见问题](faqs/trailing-stop-faq_CN.md)
 `stopClientOrderId` | STRING  | NO        | Stop 订单的客户自定义的唯一订单ID。如果未发送，则自动生成
 `stopLimitPrice`    | DECIMAL | NO *      |
 `stopLimitTimeInForce` | ENUM | NO *      | 有关可用选项，请看 [`order.place`](#timeInForce)
@@ -4151,14 +4788,549 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
 }
 ```
 
-### 查询 OCO (USER_DATA)
+### 发送新 OCO 订单 (TRADE)
+
+```javascript
+{
+  "id": "56374a46-3261-486b-a211-99ed972eb648",
+  "method": "orderList.place.oco",
+  "params":
+  {
+    "symbol": "LTCBNB",
+    "side": "BUY",
+    "quantity": 1,
+    "timestamp": 1711062760647,
+    "aboveType": "STOP_LOSS_LIMIT",
+    "abovePrice": "1.5",
+    "aboveStopPrice": "1.50000001",
+    "aboveTimeInForce": "GTC",
+    "belowType": "LIMIT_MAKER",
+    "belowPrice": "1.49999999",
+    "apiKey": "duwNf97YPLqhFIk7kZF0dDdGYVAXStA7BeEz0fIT9RAhUbixJtyS6kJ3hhzJsRXC",
+    "signature": "64614cfd8dd38260d4fd86d3c455dbf4b9d1c8a8170ea54f700592a986c30ddb"
+  }
+}
+```
+
+**权重:** 1
+
+发送新 one-cancels-the-other (OCO) 订单，激活其中一个订单会立即取消另一个订单。
+
+* OCO 有 2 legs，称为 **上方 leg** 和 **下方 leg**。
+* 其中一条 leg 必须是 `LIMIT_MAKER` 订单，另一条 leg 必须是 `STOP_LOSS` 或 `STOP_LOSS_LIMIT` 订单。
+* 针对价格限制：
+  * 如果 OCO 订单方向是 `SELL`：`LIMIT_MAKER` `price` > 最后交易价格 > `stopPrice`
+  * 如果 OCO 订单方向是 `BUY`：`LIMIT_MAKER` `price` < 最后交易价格 < `stopPrice`
+* 在订单率限制中，OCO 计为 **2** 个订单。
+
+**参数:**
+
+名称                      | 类型   | 是否必需 | 描述
+----                     |------  | -----     |----
+`symbol`                 |STRING  |YES        |
+`listClientOrderId`      |STRING  |NO         |整个订单列表的唯一ID。 如果未发送则自动生成。 <br> 仅当前一个订单已填满或完全过期时，才会接受具有相同的`listClientOrderId`。 <br> `listClientOrderId` 与 `aboveClientOrderId` 和 `belowCLientOrderId` 不同。
+`side`                   |ENUM    |YES        |订单方向：`BUY` or `SELL`
+`quantity`               |DECIMAL |YES        |两个 legs 的数量。
+`aboveType`              |ENUM    |YES        |支持值：`STOP_LOSS_LIMIT`, `STOP_LOSS`, `LIMIT_MAKER`。
+`aboveClientOrderId`     |STRING  |NO         |上方 leg 的唯一ID。 如果未发送则自动生成。
+`aboveIcebergQty`        |LONG    |NO         |请注意，只有当 `aboveTimeInForce` 为 `GTC` 时才能使用。
+`abovePrice`             |DECIMAL |NO         |
+`aboveStopPrice`         |DECIMAL |NO         |如果 `aboveType` 是 `STOP_LOSS` 或 `STOP_LOSS_LIMIT` 才能使用。<br> 必须指定 `aboveStopPrice` 或 `aboveTrailingDelta` 或两者。
+`aboveTrailingDelta`     |LONG    |NO         |请看 [追踪止盈止损(Trailing Stop)订单常见问题](faqs/trailing-stop-faq_CN.md).
+`aboveTimeInForce`       |DECIMAL |NO         |如果 `aboveType` 是 `STOP_LOSS_LIMIT`，则为必填项。
+`aboveStrategyId`        |INT     |NO         |订单策略中上方 leg 订单的 ID。
+`aboveStrategyType`      |INT     |NO         |上方 leg 订单策略的任意数值。<br>小于 `1000000` 的值被保留，无法使用。
+`belowType`              |ENUM    |YES        |支持值：`STOP_LOSS_LIMIT`, `STOP_LOSS`, `LIMIT_MAKER`
+`belowClientOrderId`     |STRING  |NO         |
+`belowIcebergQty`        |LONG    |NO         |请注意，只有当 `belowTimeInForce` 为 `GTC` 时才能使用。
+`belowPrice`             |DECIMAL |NO         |
+`belowStopPrice`         |DECIMAL |NO         |如果 `belowType` 是 `STOP_LOSS` 或 `STOP_LOSS_LIMIT` 才能使用 <br> 必须指定 `belowStopPrice` 或 `belowTrailingDelta` 或两者。
+`belowTrailingDelta`     |LONG    |NO         |请看 [追踪止盈止损(Trailing Stop)订单常见问题](faqs/trailing-stop-faq_CN.md)。
+`belowTimeInForce`       |ENUM    |NO         |如果`belowType` 是 `STOP_LOSS_LIMIT`，则为必须配合提交的值。
+`belowStrategyId`        |INT     |NO          |订单策略中下方 leg 订单的 ID。
+`belowStrategyType`      |INT     |NO         |下方 leg 订单策略的任意数值。<br>小于 `1000000` 的值被保留，无法使用。
+`newOrderRespType`       |ENUM    |NO         |响应格式可选值: `ACK`, `RESULT`, `FULL`。
+`selfTradePreventionMode`|ENUM    |NO         |允许的 ENUM 取决于交易对上的配置。 可能支持的值为 `EXPIRE_TAKER`, `EXPIRE_MAKER`, `EXPIRE_BOTH`, `NONE`。
+`apiKey`                 |STRING  |YES        |
+`recvWindow`             |LONG    |NO         |不能大于 `60000`。
+`signature`              |STRING  |YES        |
+`timestamp`              |LONG    |YES        | 
+
+**数据源:**
+撮合引擎
+
+**响应:**
+
+使用 `newOrderRespType` 参数来选择 `orderReports` 的响应格式。以下示例适用于 `RESULT` 响应类型。 请参阅 [`order.place`](##下新的订单-trade)了解更多 `orderReports` 的响应类型。
+
+```javascript
+{
+  "id": "56374a46-3261-486b-a211-99ed972eb648",
+  "status": 200,
+  "result":
+  {
+    "orderListId": 2,
+    "contingencyType": "OCO",
+    "listStatusType": "EXEC_STARTED",
+    "listOrderStatus": "EXECUTING",
+    "listClientOrderId": "cKPMnDCbcLQILtDYM4f4fX",
+    "transactionTime": 1711062760648,
+    "symbol": "LTCBNB",
+    "orders":
+    [
+      {
+        "symbol": "LTCBNB",
+        "orderId": 2,
+        "clientOrderId": "0m6I4wfxvTUrOBSMUl0OPU"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 3,
+        "clientOrderId": "Z2IMlR79XNY5LU0tOxrWyW"
+      }
+    ],
+    "orderReports":
+    [
+      {
+        "symbol": "LTCBNB",
+        "orderId": 2,
+        "orderListId": 2,
+        "clientOrderId": "0m6I4wfxvTUrOBSMUl0OPU",
+        "transactTime": 1711062760648,
+        "price": "1.50000000",
+        "origQty": "1.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "STOP_LOSS_LIMIT",
+        "side": "BUY",
+        "stopPrice": "1.50000001",
+        "workingTime": -1,
+        "selfTradePreventionMode": "NONE"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 3,
+        "orderListId": 2,
+        "clientOrderId": "Z2IMlR79XNY5LU0tOxrWyW",
+        "transactTime": 1711062760648,
+        "price": "1.49999999",
+        "origQty": "1.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.00000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT_MAKER",
+        "side": "BUY",
+        "workingTime": 1711062760648,
+        "selfTradePreventionMode": "NONE"
+      }
+    ]
+  },
+  "rateLimits":
+  [
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "SECOND",
+      "intervalNum": 10,
+      "limit": 50,
+      "count": 2
+    },
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "DAY",
+      "intervalNum": 1,
+      "limit": 160000,
+      "count": 2
+    },
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 1
+    }
+  ]
+}
+```
+
+### 发送新订单列表 - OTO (TRADE)
+
+```javascript
+{
+  "id": "1712544395950",
+  "method": "orderList.place.oto",
+  "params": {
+    "signature": "3e1e5ac8690b0caf9a2afd5c5de881ceba69939cc9d817daead5386bf65d0cbb",
+    "apiKey": "Rf07JlnL9PHVxjs27O5CvKNyOsV4qJ5gXdrRfpvlOdvMZbGZbPO5Ce2nIwfRP0iA",
+    "pendingQuantity": 1,
+    "pendingSide": "BUY",
+    "pendingType": "MARKET",
+    "symbol": "LTCBNB",
+    "recvWindow": "5000",
+    "timestamp": "1712544395951",
+    "workingPrice": 1,
+    "workingQuantity": 1,
+    "workingSide": "SELL",
+    "workingTimeInForce": "GTC",
+    "workingType": "LIMIT"
+  }
+}
+```
+
+发送一个新的 OTO 订单。
+
+* 一个 OTO 订单（One-Triggers-the-Other）是一个包含了两个订单的订单列表.
+* 第一个订单被称为**生效订单**，必须为 `LIMIT` 或 `LIMIT_MAKER` 类型的订单。最初，订单簿上只有生效订单。
+* 第二个订单被称为**待处理订单**。它可以是任何订单类型，但不包括使用参数 `quoteOrderQty` 的 `MARKET` 订单。只有当生效订单**完全成交**时，待处理订单才会被自动下单。
+* 如果生效订单或者待处理订单中的任意一个被单独取消，订单列表中剩余的那个订单也会被随之取消或过期。
+* 如果生效订单在下订单列表后**立即完全成交**，则可能会得到订单响应。其中，生效订单的状态为 `FILLED` ，但待处理订单的状态为 `PENDING_NEW`。针对这类情况，如果需要检查当前状态，您可以查询相关的待处理订单。
+* `OTO` 订单对于下单速率限制、 `EXCHANGE_MAX_NUM_ORDERS` 过滤器和 `MAX_NUM_ORDERS` 过滤器来说，会被计为**2**个订单。
+
+**权重:** 1
+
+**参数:**
+
+名称                      | 类型   | 是否必需 | 描述
+----                   |----   |------    |------
+`symbol`                 |STRING |YES       |
+`listClientOrderId`      |STRING |NO        |整个订单列表的唯一ID。 如果未发送则自动生成。 <br> 仅当前一个订单列表已填满或完全过期时，才会接受含有相同 `listClientOrderId` 值的新订单列表。 <br> `listClientOrderId` 与 `workingClientOrderId` 和 `pendingClientOrderId` 不同。
+`newOrderRespType`       |ENUM   |NO        |用于设置JSON响应的格式。 支持的数值： [订单返回类型](./enums_CN.md#orderresponsetype)
+`selfTradePreventionMode`|ENUM   |NO        |允许的数值取决于交易对上的配置。参考 [STP 模式](./enums_CN.md#stpmodes)
+`workingType`            |ENUM   |YES       |支持的数值： `LIMIT`， `LIMIT_MAKER`
+`workingSide`            |ENUM   |YES       |支持的数值： [订单方向](./enums_CN.md#side)
+`workingClientOrderId`   |STRING |NO        |用于标识生效订单的唯一ID。 <br> 如果未发送则自动生成。
+`workingPrice`           |DECIMAL|YES       |
+`workingQuantity`        |DECIMAL|YES       |用于设置生效订单的数量。 
+`workingIcebergQty`      |DECIMAL|YES       |只有当 `workingTimeInForce` 为 `GTC` 时才能使用。
+`workingTimeInForce`     |ENUM   |NO        |支持的数值： [生效时间](#timeinforce)
+`workingStrategyId`      |INT    |NO        |订单策略中用于标识生效订单的 ID。
+`workingStrategyType`    |INT    |NO        |用于标识生效订单策略的任意数值。<br> 小于 `1000000` 的值被保留，无法使用。
+`pendingType`            |ENUM   |YES       |支持的数值： [订单类型](#order-type)<br> 请注意，系统不支持使用 `quoteOrderQty` 的 `MARKET` 订单。
+`pendingSide`            |ENUM   |YES       |支持的数值： [订单方向](./enums_CN.md#side)
+`pendingClientOrderId`   |STRING |NO        |用于标识待处理订单的唯一ID。 <br> 如果未发送则自动生成。
+`pendingPrice`           |DECIMAL|NO        |
+`pendingStopPrice`       |DECIMAL|NO        |
+`pendingTrailingDelta`   |DECIMAL|NO        |
+`pendingQuantity`        |DECIMAL|YES       |用于设置待处理订单的数量。 
+`pendingIcebergQty`      |DECIMAL|NO        |只有当 `pendingTimeInForce` 为 `GTC` 时才能使用。
+`pendingTimeInForce`     |ENUM   |NO        |支持的数值： [生效时间](#timeinforce)
+`pendingStrategyId`      |INT    |NO        |订单策略中用于标识待处理订单的 ID。
+`pendingStrategyType`    |INT    |NO        |用于标识待处理订单策略的任意数值。 <br> 小于 `1000000` 的值被保留，无法使用。
+`recvWindow`             |LONG   |NO        |不能大于 `60000`。
+`timestamp`              |LONG   |YES       |
+`signature`              |STRING |YES       |
+
+#### 根据 `pendingType` 或者`workingType`的不同值，对于某些参数的强制要求
+
+根据 `pendingType` 或者`workingType`的不同值，对于某些可选参数有强制要求，具体如下：
+
+|类型                                                   | 强制要求的参数                  | 其他信息|
+|----                                                  |----                           |------  
+|`workingType` = `LIMIT`                               |`workingTimeInForce`           | 
+|`pendingType` = `LIMIT`                                |`pendingPrice`， `pendingTimeInForce`          |
+|`pendingType` = `STOP_LOSS` 或 `TAKE_PROFIT`           |`pendingStopPrice` 与/或 `pendingTrailingDelta`|
+|`pendingType` = `STOP_LOSS_LIMIT` 或 `TAKE_PROFIT_LIMIT`|`pendingPrice`， `pendingStopPrice` 与/或 `pendingTrailingDelta`， `pendingTimeInForce`|
+
+**数据源:**
+撮合引擎
+
+**响应:**
+
+```javascript
+{
+  "id": "1712544395950",
+  "status": 200,
+  "result": {
+    "orderListId": 626,
+    "contingencyType": "OTO",
+    "listStatusType": "EXEC_STARTED",
+    "listOrderStatus": "EXECUTING",
+    "listClientOrderId": "KA4EBjGnzvSwSCQsDdTrlf",
+    "transactionTime": 1712544395981,
+    "symbol": "1712544378871",
+    "orders": [
+      {
+        "symbol": "LTCBNB",
+        "orderId": 13,
+        "clientOrderId": "YiAUtM9yJjl1a2jXHSp9Ny"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 14,
+        "clientOrderId": "9MxJSE1TYkmyx5lbGLve7R"
+      }
+    ],
+    "orderReports": [
+      {
+        "symbol": "LTCBNB",
+        "orderId": 13,
+        "orderListId": 626,
+        "clientOrderId": "YiAUtM9yJjl1a2jXHSp9Ny",
+        "transactTime": 1712544395981,
+        "price": "1.000000",
+        "origQty": "1.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "SELL",
+        "workingTime": 1712544395981,
+        "selfTradePreventionMode": "NONE"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 14,
+        "orderListId": 626,
+        "clientOrderId": "9MxJSE1TYkmyx5lbGLve7R",
+        "transactTime": 1712544395981,
+        "price": "0.000000",
+        "origQty": "1.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.000000",
+        "status": "PENDING_NEW",
+        "timeInForce": "GTC",
+        "type": "MARKET",
+        "side": "BUY",
+        "workingTime": -1,
+        "selfTradePreventionMode": "NONE"
+      }
+    ]
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 10000000,
+      "count": 10
+    },
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 1000,
+      "count": 38
+    }
+  ]
+}
+```
+
+**注意:** 上面的 payload 没有显示所有可以出现的字段，更多请看 "订单响应中的特定条件时才会出现的字段" 部分。
+
+### 发送新订单列表 - OTOCO (TRADE)
+
+```javascript
+{
+  "id": "1712544408508",
+  "method": "orderList.place.otoco",
+  "params": {
+    "signature": "c094473304374e1b9c5f7e2558358066cfa99df69f50f63d09cfee755136cb07",
+    "apiKey": "Rf07JlnL9PHVxjs27O5CvKNyOsV4qJ5gXdrRfpvlOdvMZbGZbPO5Ce2nIwfRP0iA",
+    "pendingQuantity": 5,
+    "pendingSide": "SELL",
+    "pendingBelowPrice": 5,
+    "pendingBelowType": "LIMIT_MAKER",
+    "pendingAboveStopPrice": 0.5,
+    "pendingAboveType": "STOP_LOSS",
+    "symbol": "LTCBNB",
+    "recvWindow": "5000",
+    "timestamp": "1712544408509",
+    "workingPrice": 1.5,
+    "workingQuantity": 1,
+    "workingSide": "BUY",
+    "workingTimeInForce": "GTC",
+    "workingType": "LIMIT"
+  }
+}
+```
+
+发送一个新的 OTOCO 订单。
+
+* 一个 OTOCO 订单（One-Triggers-One-Cancels-the-Other）是一个包含了三个订单的订单列表。
+* 第一个订单被称为**生效订单**，必须为 `LIMIT` 或 `LIMIT_MAKER` 类型的订单。最初，订单簿上只有生效订单。
+    * 生效订单的行为与此一致 [OTO](#new-order-list---oto-trade)
+* 一个OTOCO订单有两个待处理订单（pending above 和 pending below），它们构成了一个 OCO 订单列表。只有当生效订单**完全成交**时，待处理订单们才会被自动下单。
+    * 待处理上方(pending above)订单和待处理下方(pending below)订单都遵循与 OCO 订单列表相同的规则 [Order List OCO](#new-order-list---oco-trade)。
+* `OTOCO` 订单对于下单速率限制、 `EXCHANGE_MAX_NUM_ORDERS` 过滤器和 `MAX_NUM_ORDERS` 过滤器来说，会被计为**3**个订单。
+
+**权重:** 1
+
+**参数:**
+
+名称                      | 类型   | 是否必需 | 描述
+----                     |----   |------    |------
+`symbol`                   |STRING |YES       |
+`listClientOrderId`        |STRING |NO        |整个订单列表的唯一ID。 如果未发送则自动生成。 <br> 仅当前一个订单列表已填满或完全过期时，才会接受含有相同 `listClientOrderId` 值的新订单列表。 <br>  `listClientOrderId` 与 `workingClientOrderId`， `pendingAboveClientOrderId` 以及 `pendingBelowClientOrderId` 不同。
+`newOrderRespType`         |ENUM   |NO        |用于设置JSON响应的格式。 支持的数值： [订单返回类型](./enums_CN.md#orderresponsetype)
+`selfTradePreventionMode`  |ENUM   |NO        |允许的数值取决于交易对上的配置。参考 [STP 模式](./enums_CN.md#stpmodes)
+`workingType`              |ENUM   |YES       |支持的数值： `LIMIT`，`LIMIT_MAKER`
+`workingSide`              |ENUM   |YES       |支持的数值： [订单方向](./enums_CN.md#side)
+`workingClientOrderId`     |STRING |NO        |用于标识生效订单的唯一ID。 <br> 如果未发送则自动生成。
+`workingPrice`             |DECIMAL|YES       |
+`workingQuantity`          |DECIMAL|YES        |
+`workingIcebergQty`        |DECIMAL|NO        |只有当 `workingTimeInForce` 为 `GTC` 时才能使用。
+`workingTimeInForce`       |ENUM   |NO        |支持的数值： [生效时间](#timeinforce)
+`workingStrategyId`        |INT    |NO        |订单策略中用于标识生效订单的 ID。
+`workingStrategyType`      |INT    |NO        |用于标识生效订单策略的任意数值。<br> 小于 `1000000` 的值被保留，无法使用。
+`pendingSide`              |ENUM   |YES       |支持的数值： [订单方向](./enums_CN.md#side)
+`pendingQuantity`          |DECIMAL|YES       |
+`pendingAboveType`         |ENUM   |YES       |支持的数值： `LIMIT_MAKER`，`STOP_LOSS` 和 `STOP_LOSS_LIMIT`
+`pendingAboveClientOrderId`|STRING |NO        |用于标识待处理上方订单的唯一ID。 <br> 如果未发送则自动生成。
+`pendingAbovePrice`        |DECIMAL|NO        |
+`pendingAboveStopPrice`    |DECIMAL|NO        |
+`pendingAboveTrailingDelta`|DECIMAL|NO        |
+`pendingAboveIcebergQty`   |DECIMAL|NO        |只有当 `pendingAboveTimeInForce` 为 `GTC` 时才能使用。
+`pendingAboveTimeInForce`  |ENUM   |NO        |
+`pendingAboveStrategyId`   |INT    |NO        |订单策略中用于标识待处理上方订单的 ID。
+`pendingAboveStrategyType` |INT    |NO        |用于标识待处理上方订单策略的任意数值。 <br> 小于 `1000000` 的值被保留，无法使用。
+`pendingBelowType`         |ENUM   |NO        |支持的数值： `LIMIT_MAKER`，`STOP_LOSS` 和 `STOP_LOSS_LIMIT`
+`pendingBelowClientOrderId`|STRING |NO        |用于标识待处理下方订单的唯一ID。 <br> 如果未发送则自动生成。
+`pendingBelowPrice`        |DECIMAL|NO        |
+`pendingBelowStopPrice`    |DECIMAL|NO        |
+`pendingBelowTrailingDelta`|DECIMAL|NO        |
+`pendingBelowIcebergQty`   |DECIMAL|NO        |只有当 `pendingBelowTimeInForce` 为 `GTC` 时才能使用。
+`pendingBelowTimeInForce`  |ENUM   |NO        |支持的数值： [生效时间](#timeinforce)
+`pendingBelowStrategyId`   |INT    |NO        |订单策略中用于标识待处理下方订单的 ID。
+`pendingBelowStrategyType` |INT    |NO        |用于标识待处理下方订单策略的任意数值。 <br> 小于 `1000000` 的值被保留，无法使用。
+`recvWindow`               |LONG   |NO        |不能大于 `60000`。
+`timestamp`                |LONG   |YES       |
+`signature`                |STRING|YES|
+
+#### 根据 `pendingAboveType`， `pendingBelowType` 或者`workingType`的不同值，对于某些参数的强制要求
+
+根据 `pendingAboveType`， `pendingBelowType` 或者`workingType`的不同值，对于某些可选参数有强制要求，具体如下：
+
+|类型                                                        | 强制要求的参数                  | 其他信息|
+|----                                                       |----                           |------  
+|`workingType` = `LIMIT`                                    |`workingTimeInForce`           | 
+|`pendingAboveType`= `LIMIT_MAKER`                                |`pendingAbovePrice`     |
+|`pendingAboveType`= `STOP_LOSS`          |`pendingAboveStopPrice` 与/或 `pendingAboveTrailingDelta`|
+|`pendingAboveType`=`STOP_LOSS_LIMIT` |`pendingAbovePrice`， `pendingAboveStopPrice` 与/或 `pendingAboveTrailingDelta`， `pendingAboveTimeInForce`|
+|`pendingBelowType`= `LIMIT_MAKER`                                |`pendingBelowPrice`          |
+|`pendingBelowType`= `STOP_LOSS`            |`pendingBelowStopPrice` 与/或 `pendingBelowTrailingDelta`|
+|`pendingBelowType`=`STOP_LOSS_LIMIT` |`pendingBelowPrice`， `pendingBelowStopPrice` 与/或 `pendingBelowTrailingDelta`， `pendingBelowTimeInForce`|
+
+**数据源:**
+撮合引擎
+
+**响应:**
+
+```javascript
+{
+  "id": "1712544408508",
+  "status": 200,
+  "result": {
+    "orderListId": 629,
+    "contingencyType": "OTO",
+    "listStatusType": "EXEC_STARTED",
+    "listOrderStatus": "EXECUTING",
+    "listClientOrderId": "GaeJHjZPasPItFj4x7Mqm6",
+    "transactionTime": 1712544408537,
+    "symbol": "1712544378871",
+    "orders": [
+      {
+        "symbol": "1712544378871",
+        "orderId": 23,
+        "clientOrderId": "OVQOpKwfmPCfaBTD0n7e7H"
+      },
+      {
+        "symbol": "1712544378871",
+        "orderId": 24,
+        "clientOrderId": "YcCPKCDMQIjNvLtNswt82X"
+      },
+      {
+        "symbol": "1712544378871",
+        "orderId": 25,
+        "clientOrderId": "ilpIoShcFZ1ZGgSASKxMPt"
+      }
+    ],
+    "orderReports": [
+      {
+        "symbol": "LTCBNB",
+        "orderId": 23,
+        "orderListId": 629,
+        "clientOrderId": "OVQOpKwfmPCfaBTD0n7e7H",
+        "transactTime": 1712544408537,
+        "price": "1.500000",
+        "origQty": "1.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.000000",
+        "status": "NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT",
+        "side": "BUY",
+        "workingTime": 1712544408537,
+        "selfTradePreventionMode": "NONE"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 24,
+        "orderListId": 629,
+        "clientOrderId": "YcCPKCDMQIjNvLtNswt82X",
+        "transactTime": 1712544408537,
+        "price": "0.000000",
+        "origQty": "5.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.000000",
+        "status": "PENDING_NEW",
+        "timeInForce": "GTC",
+        "type": "STOP_LOSS",
+        "side": "SELL",
+        "stopPrice": "0.500000",
+        "workingTime": -1,
+        "selfTradePreventionMode": "NONE"
+      },
+      {
+        "symbol": "LTCBNB",
+        "orderId": 25,
+        "orderListId": 629,
+        "clientOrderId": "ilpIoShcFZ1ZGgSASKxMPt",
+        "transactTime": 1712544408537,
+        "price": "5.000000",
+        "origQty": "5.000000",
+        "executedQty": "0.000000",
+        "cummulativeQuoteQty": "0.000000",
+        "status": "PENDING_NEW",
+        "timeInForce": "GTC",
+        "type": "LIMIT_MAKER",
+        "side": "SELL",
+        "workingTime": -1,
+        "selfTradePreventionMode": "NONE"
+      }
+    ]
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "ORDERS",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 10000000,
+      "count": 18
+    },
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 1000,
+      "count": 65
+    }
+  ]
+}
+```
+
+**注意:** 上面的 payload 没有显示所有可以出现的字段，更多请看 "订单响应中的特定条件时才会出现的字段" 部分。
+
+### 查询订单列表 (USER_DATA)
 
 ```javascript
 {
@@ -4173,7 +5345,7 @@ days    | `1d`, `2d` ... `7d`
 }
 ```
 
-检查 OCO 的执行状态。
+检查订单列表的执行状态。
 
 对于单个订单的执行状态，使用 [`order.status`](#查询订单-USER_DATA)。
 
@@ -4196,12 +5368,12 @@ days    | `1d`, `2d` ... `7d`
         <td><code>origClientOrderId</code></td>
         <td>STRING</td>
         <td rowspan="2">YES</td>
-        <td>通过 <code>listClientOrderId</code> 获取 OCO </td>
+        <td>通过 <code>listClientOrderId</code> 获取订单列表 </td>
     </tr>
     <tr>
         <td><code>orderListId</code></td>
         <td>INT</td>
-        <td>通过 <code>orderListId</code> 获取 OCO</td>
+        <td>通过 <code>orderListId</code> 获取订单列表</td>
     </tr>
     <tr>
         <td><code>apiKey</code></td>
@@ -4232,7 +5404,7 @@ days    | `1d`, `2d` ... `7d`
 
 备注：
 
-* `origClientOrderId` 指的是 OCO 本身的 `listClientOrderId`。
+* `origClientOrderId` 指的是订单列表本身的 `listClientOrderId`。
 
 * 如果同时指定了 `origClientOrderId` 和 `orderListId` 参数，仅使用 `origClientOrderId` 并忽略 `orderListId`。
 
@@ -4271,14 +5443,14 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 2
+      "limit": 6000,
+      "count": 4
     }
   ]
 }
 ```
 
-### 撤销 OCO 订单(TRADE)
+### 撤销订单列表订单(TRADE)
 
 ```javascript
 {
@@ -4321,18 +5493,18 @@ days    | `1d`, `2d` ... `7d`
         <td><code>orderListId</code></td>
         <td>INT</td>
         <td rowspan="2">YES</td>
-        <td>通过 <code>orderListId</code> 撤销 OCO</td>
+        <td>通过 <code>orderListId</code> 撤销订单列表</td>
     </tr>
     <tr>
         <td><code>listClientOrderId</code></td>
         <td>STRING</td>
-        <td>通过 <code>listClientId</code> 撤销 OCO</td>
+        <td>通过 <code>listClientId</code> 撤销订单列表</td>
     </tr>
     <tr>
         <td><code>newClientOrderId</code></td>
         <td>STRING</td>
         <td>NO</td>
-        <td>已取消 OCO 的新 ID。如果未发送，则自动生成</td>
+        <td>已取消订单列表的新 ID。如果未发送，则自动生成</td>
     </tr>
     <tr>
         <td><code>apiKey</code></td>
@@ -4365,7 +5537,7 @@ days    | `1d`, `2d` ... `7d`
 
 * 如果同时指定了 `orderListId` 和 `listClientOrderId` 参数，仅使用 `orderListId` 并忽略 `listClientOrderId`。
 
-* 使用 [`order.cancel`](#撤销订单-TRADE) 取消单个 leg 也将会取消整个 OCO。
+* 使用 [`order.cancel`](#撤销订单-TRADE) 撤销订单列表内的某个订单，则整个订单列表将被撤销。
 
 **数据源:**
 撮合引擎
@@ -4437,14 +5609,14 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
 }
 ```
 
-### 查询 OCO 挂单 (USER_DATA)
+### 查询订单列表挂单 (USER_DATA)
 
 ```javascript
 {
@@ -4458,7 +5630,7 @@ days    | `1d`, `2d` ... `7d`
 }
 ```
 
-查询所有 OCO 挂单的执行状态。
+查询所有订单列表挂单的执行状态。
 
 如果您需要持续监控订单状态更新，请考虑使用 WebSocket Streams：
 
@@ -4514,14 +5686,14 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 3
+      "limit": 6000,
+      "count": 6
     }
   ]
 }
 ```
 
-### 下 SOR 订单 (TRADE)o
+### 下 SOR 订单 (TRADE)
 
 ```javascript
 {
@@ -4616,7 +5788,7 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
     }
   ]
@@ -4647,16 +5819,27 @@ days    | `1d`, `2d` ... `7d`
 用于测试使用智能订单路由 (SOR) 的订单请求，但不会提交到撮合引擎。
 
 **权重:**
-1
+
+| 条件                       | 请求权重 |
+|------------                    | ------------ |
+|没有 `computeCommissionRates`| 1            |
+|有 `computeCommissionRates`   |20            |
 
 **参数:**
 
-参考 `sor.order.place`
+除了 [`sor.order.place`](#place-new-order-using-sor-trade) 所有参数,
+下面参数也有效:
+
+参数名                   |类型          | 是否必需    | 描述
+------------           | ------------ | ------------ | ------------
+`computeCommissionRates` | BOOLEAN      | NO           | 默认: `false`
 
 **数据源:**
 缓存
 
 **响应:**
+
+没有 `computeCommissionRates`:
 
 ```javascript
 {
@@ -4668,8 +5851,42 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
+      "limit": 6000,
       "count": 1
+    }
+  ]
+}
+```
+
+有 `computeCommissionRates`:
+
+```javascript
+{
+  "id": "3a4437e2-41a3-4c19-897c-9cadc5dce8b6",
+  "status": 200,
+  "result": {
+    "standardCommissionForOrder": {                // 订单交易的标准佣金率。
+      "maker": "0.00000112",
+      "taker": "0.00000114"
+    },
+    "taxCommissionForOrder": {                     // 订单交易的税率。
+      "maker": "0.00000112",
+      "taker": "0.00000114"
+    },
+    "discount": {                                  // 以BNB支付时的标准佣金折扣。
+      "enabledForAccount": true,
+      "enabledForSymbol": true,
+      "discountAsset": "BNB",
+      "discount": "0.25000000"                     // 当用BNB支付佣金时，在标准佣金上按此比率打折。
+    }
+  },
+  "rateLimits": [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -4701,6 +5918,7 @@ days    | `1d`, `2d` ... `7d`
 名称                | 类型    | 是否必需 | 描述
 ------------------- | ------- | --------- | ------------
 `apiKey`            | STRING  | YES       |
+`omitZeroBalances`  | BOOLEAN | NO        | 如果`true`，将隐藏所有零余额。<br>默认值：`false`。
 `recvWindow`        | INT     | NO        | 值不能大于 `60000`
 `signature`         | STRING  | YES       |
 `timestamp`         | INT     | YES       |
@@ -4759,8 +5977,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -4824,8 +6042,8 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 20
+      "limit": 6000,
+      "count": 40
     }
   ]
 }
@@ -4923,14 +6141,14 @@ days    | `1d`, `2d` ... `7d`
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
 ```
 
-### 账户 OCO 订单历史 (USER_DATA)
+### 账户订单列表历史 (USER_DATA)
 
 ```javascript
 {
@@ -4947,7 +6165,7 @@ days    | `1d`, `2d` ... `7d`
 }
 ```
 
-查询所有 OCO 的信息，按时间范围过滤。
+查询所有订单列表的信息，按时间范围过滤。
 
 **权重:**
 20
@@ -4969,18 +6187,18 @@ days    | `1d`, `2d` ... `7d`
 
 * 如果指定了 `startTime` 和/或 `endTime`，则忽略 `fromId`。
 
-  OCO 订单是按照最后一次更新的 OCO 执行状态的 `transactionTime` 过滤的。
+  订单列表是按照最后一次更新的订单列表执行状态的 `transactionTime` 过滤的。
 
-* 如果指定了 `fromId`，返回的 OCO 将是 order list ID >= `fromId`。
+* 如果指定了 `fromId`，返回的订单列表将是 order list ID >= `fromId`。
 
-* 如果不指定条件，则返回最近的 OCO 订单。
+* 如果不指定条件，则返回最近的订单列表。
 
 **数据源:**
 数据库
 
 **响应:**
 
-OCO 的状态报告与 [`orderList.status`](#查询-OCO-user_data) 相同。
+订单列表的状态报告与 [`orderList.status`](#查询-OCO-user_data) 相同。
 
 ```javascript
 {
@@ -5014,8 +6232,8 @@ OCO 的状态报告与 [`orderList.status`](#查询-OCO-user_data) 相同。
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -5118,8 +6336,8 @@ OCO 的状态报告与 [`orderList.status`](#查询-OCO-user_data) 相同。
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -5199,8 +6417,8 @@ timestamp           | LONG   | YES          |
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
@@ -5231,14 +6449,14 @@ timestamp           | LONG   | YES          |
 
 名称                       | 类型   | 是否必需         | 描述
 -----                      | ---   |----      | ---------
-`symbol`                   |STRING |Yes        |
-`startTime`                |LONG   |No        |
-`endTime`                  |LONG   |No        |
-`fromAllocationId`         |INT    |No        |
-`limit`                    |INT    |No        |默认值 500； 最大值 1000
-`orderId`                  |LONG   |No        |
-`recvWindow`               |LONG   |No        |不能大于 `60000`
-`timestamp`                |LONG   |No        |
+`symbol`                   |STRING |YES        |
+`startTime`                |LONG   |NO        |
+`endTime`                  |LONG   |NO        |
+`fromAllocationId`         |INT    |NO        |
+`limit`                    |INT    |NO        |默认值 500； 最大值 1000
+`orderId`                  |LONG   |NO        |
+`recvWindow`               |LONG   |NO        |不能大于 `60000`
+`timestamp`                |LONG   |NO        |
 
 支持的参数组合:
 
@@ -5286,12 +6504,90 @@ timestamp           | LONG   | YES          |
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 10
+      "limit": 6000,
+      "count": 20
     }
   ]
 }
 ```
+
+
+### 账户佣金费率 (USER_DATA)
+
+```javascript
+{
+  "id": "d3df8a61-98ea-4fe0-8f4e-0fcea5d418b0",
+  "method": "account.commission",
+  "params": {
+    "symbol": "BTCUSDT",
+    "apiKey": "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A",
+    "signature": "c5a5ffb79fd4f2e10a92f895d488943a57954edf5933bde3338dfb6ea6d6eefc",
+    "timestamp": 1673923281052
+  }
+}
+```
+
+获取当前账户的佣金费率。
+
+**参数:**
+
+参数名                       | 类型  |是否必需 | 描述
+-----                      | ---   |----      | ---------
+`symbol`                   |STRING |YES        |
+
+**权重:**
+20
+
+**数据源:**
+数据库
+
+
+**响应:**
+
+```javascript
+{
+  "id": "d3df8a61-98ea-4fe0-8f4e-0fcea5d418b0",
+  "status": 200,
+  "result":
+  [
+    {
+      "symbol": "BTCUSDT",
+      "standardCommission":               // 订单交易的标准佣金率。
+      {
+        "maker": "0.00000010",
+        "taker": "0.00000020",
+        "buyer": "0.00000030",
+        "seller": "0.00000040"
+      },
+      "taxCommission":                   // 订单交易的税率。
+      {
+        "maker": "0.00000112",
+        "taker": "0.00000114",
+        "buyer": "0.00000118",
+        "seller": "0.00000116"
+      },
+      "discount":                        // 以BNB支付时的标准佣金折扣。
+      {
+        "enabledForAccount": true,
+        "enabledForSymbol": true,
+        "discountAsset": "BNB",
+        "discount": "0.75000000"         // 当用BNB支付佣金时，在标准佣金上按此比率打折。
+      }
+    }
+  ],
+  "rateLimits":
+  [
+    {
+      "rateLimitType": "REQUEST_WEIGHT",
+      "interval": "MINUTE",
+      "intervalNum": 1,
+      "limit": 6000,
+      "count": 20
+    }
+  ]
+}
+```
+
 
 ## Websocket 账户信息
 
@@ -5346,8 +6642,8 @@ timestamp           | LONG   | YES          |
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -5394,8 +6690,8 @@ timestamp           | LONG   | YES          |
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }
@@ -5440,8 +6736,8 @@ timestamp           | LONG   | YES          |
       "rateLimitType": "REQUEST_WEIGHT",
       "interval": "MINUTE",
       "intervalNum": 1,
-      "limit": 1200,
-      "count": 1
+      "limit": 6000,
+      "count": 2
     }
   ]
 }

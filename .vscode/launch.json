@@ -1,0 +1,33 @@
+{
+    "configurations": [
+        {
+            "args": [
+                "
+                "
+            ],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "name": "Yeoman 
+            ",
+            "program": "${workspaceFolder}/node_modules/yo/lib/cli.js",
+            "request": "launch",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "type": "node"
+        },
+        {
+   
+            "name": ".NET Core Attach",
+            "type": "coreclr",
+            "request": "attach"
+        },
+        {
+            "type": "node-terminal",
+            "name": "Terminal de Depuração de JavaScript",
+            "request": "launch",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}name: 'Azure Pipelines'
+vmImage: 'ubuntu-24.04'
